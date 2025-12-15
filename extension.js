@@ -19,23 +19,38 @@ function activate(context) {
         const repoName = await vscode.window.showInputBox({ prompt: "Enter GitHub repository name" });
         if (!repoName) return;
 
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            vscode.window.showErrorMessage("No workspace folder open");
+            return;
+        }
+        const cwd = workspaceFolder.uri.fsPath;
+
         const username = await getUser(token);
 
         output.appendLine(`Creating repo: ${username}/${repoName}`);
 
         await createRepo(token, repoName);
 
-        exec(`git init`, () => {
-            exec(`git remote add origin https://github.com/${username}/${repoName}.git`);
+        exec(`git init`, { cwd }, () => {
+            exec(`git remote add origin https://github.com/${username}/${repoName}.git`, { cwd }, () => {
+                exec(`git add .`, { cwd }, () => {
+                    exec(`git commit -m "Initial commit"`, { cwd }, (err) => {
+                        if (!err) {
+                            exec(`git push -u origin main`, { cwd });
+                        }
+                    });
+                });
+            });
         });
 
         vscode.window.showInformationMessage("AutoPush Started");
         isRunning = true;
 
         watcher = vscode.workspace.createFileSystemWatcher("**/*");
-        watcher.onDidChange(() => push(output));
-        watcher.onDidCreate(() => push(output));
-        watcher.onDidDelete(() => push(output));
+        watcher.onDidChange(() => push(output, cwd));
+        watcher.onDidCreate(() => push(output, cwd));
+        watcher.onDidDelete(() => push(output, cwd));
     });
 
     // Stop
@@ -76,10 +91,10 @@ async function createRepo(token, name) {
     });
 }
 
-function push(output) {
+function push(output, cwd) {
     if (!isRunning) return;
 
-    exec(`git add . && git commit -m "Auto update" && git push -u origin main`,
+    exec(`git add . && git commit -m "Auto update" && git push`, { cwd },
         (err, stdout, stderr) => {
             if (err) output.appendLine("Push error: " + err);
         }
